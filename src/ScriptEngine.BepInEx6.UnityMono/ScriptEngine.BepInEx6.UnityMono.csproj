@@ -1,0 +1,39 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>netstandard2.1</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <AssemblyName>CustomScriptEngine</AssemblyName>
+    <RootNamespace>CustomScriptEngine.BepInEx6.UnityMono</RootNamespace>
+    <OutputType>Library</OutputType>
+    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\ScriptEngine.Core\ScriptEngine.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- BepInEx 6 Unity Mono build used by the target game. -->
+    <PackageReference Include="BepInEx.Unity.Mono" Version="6.0.0-be.788" IncludeAssets="compile;build;buildTransitive" PrivateAssets="all" />
+    <PackageReference Include="UnityEngine.Modules" Version="2022.1.24" IncludeAssets="compile" PrivateAssets="all" />
+  </ItemGroup>
+  <!-- Build a self-contained deployment folder for the plugin. For runtime testing,
+       copy the entire Deployment folder instead of chasing missing dependency DLLs. -->
+  <Target Name="PrepareDeployment" AfterTargets="Build">
+    <PropertyGroup>
+      <DeploymentDir>$(TargetDir)Deployment</DeploymentDir>
+    </PropertyGroup>
+    <MakeDir Directories="$(DeploymentDir)" />
+    <ItemGroup>
+      <DeploymentFiles Include="$(TargetDir)*.dll" />
+      <DeploymentFiles Remove="$(TargetDir)BepInEx*.dll" />
+      <DeploymentFiles Remove="$(TargetDir)UnityEngine*.dll" />
+      <DeploymentFiles Remove="$(TargetDir)Unity*.dll" />
+      <DeploymentFiles Remove="$(TargetDir)Mono*.dll" />
+    </ItemGroup>
+    <Copy SourceFiles="@(DeploymentFiles)" DestinationFolder="$(DeploymentDir)" SkipUnchangedFiles="true" />
+  </Target>
+
+</Project>

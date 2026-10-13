@@ -6,6 +6,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ScriptEngine.Core", "src\Sc
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ScriptEngine.BepInEx6.UnityMono", "src\ScriptEngine.BepInEx6.UnityMono\ScriptEngine.BepInEx6.UnityMono.csproj", "{8C2D0B77-1D72-4552-A62D-F2D5B2C29A02}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ScriptEngine.BepInEx6.UnityIL2CPP", "src\ScriptEngine.BepInEx6.UnityIL2CPP\ScriptEngine.BepInEx6.UnityIL2CPP.csproj", "{BE956B2C-CA57-4C98-8F9A-F21627A3BE03}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -20,6 +22,10 @@ Global
 		{8C2D0B77-1D72-4552-A62D-F2D5B2C29A02}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{8C2D0B77-1D72-4552-A62D-F2D5B2C29A02}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{8C2D0B77-1D72-4552-A62D-F2D5B2C29A02}.Release|Any CPU.Build.0 = Release|Any CPU
+		{BE956B2C-CA57-4C98-8F9A-F21627A3BE03}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{BE956B2C-CA57-4C98-8F9A-F21627A3BE03}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{BE956B2C-CA57-4C98-8F9A-F21627A3BE03}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{BE956B2C-CA57-4C98-8F9A-F21627A3BE03}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

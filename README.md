@@ -1,111 +1,115 @@
-# CustomScriptEngine V2 — BepInEx 6 Unity Mono
+# CustomScriptEngine V4 — Mono + IL2CPP, one solution build
 
-## What is CustomScriptEngine?
+CustomScriptEngine compiles multiple C# source files together so one script can call helpers declared in other files. This package includes two backend-specific plugins built from a single Visual Studio solution:
 
-CustomScriptEngine is a runtime C# script engine for compatible Unity Mono games running under BepInEx 6. It allows `.cs` scripts to be compiled with Roslyn and loaded by the engine without manually building a separate plugin for every script change.
+- **Mono:** `CustomScriptEngine.dll`, targeting BepInEx 6 Unity Mono (`netstandard2.1`). Keeps the existing `BaseUnityPlugin`-based script workflow.
+- **IL2CPP:** `CustomScriptEngine.IL2CPP.dll`, targeting BepInEx 6 Unity IL2CPP (`net6.0`). Uses `ICustomScriptEntry` callbacks to run ordinary managed C# script classes without requiring each script to be a separate BepInEx plugin.
 
-The engine is intended for offline Unity games that the user owns or is authorized to modify. Compatibility depends on the game's Unity/Mono runtime and the assemblies available to the engine.
+The two plugin DLLs are deliberately put in separate deployment folders. Install only the DLL matching the backend of the target game; do not install both into the same game.
 
-## Original project and V2
+## Build both at once
 
-V2 continues the original CustomScriptEngine hot-reload workflow and updates how game and plugin references are discovered.
+Requirements: Windows, .NET SDK, Visual Studio 2022 or newer, and access to the configured NuGet feeds. Package restore requires network access unless the packages are already cached.
 
-Main capabilities:
+Run `Build-Both.bat` or `Build-Both.ps1`. The script asks for the root folder of an IL2CPP game with compatible BepInEx installed and its `BepInEx/interop` files already generated. Set `CSE_IL2CPP_GAME_DIR` to skip the prompt.
 
-- Compile `.cs` scripts at runtime using Roslyn.
-- Reload scripts with F6.
-- Watch script files for changes.
-- Keep the previous working script version if a new compilation fails.
-- Discover assemblies in the game's `*_Data/Managed`, `BepInEx/core`, `BepInEx/plugins`, and `BepInEx/scripts/libs` directories.
-- Cache discovered assembly paths in `BepInEx/scripts/reference-cache.txt`.
-- Support script manifests, `// @reference ...` directives, and manually added DLL references.
-- Recompile scripts when relevant DLL references change.
+The solution is built once with both plugin projects. For Visual Studio, set the MSBuild property `GameDir` to that game root (for example, in the project build properties) before building **Release**. IL2CPP references are taken from the target game's generated proxy assemblies so `MonoBehaviour`/`Input` types match the IL2CPP runtime.
 
-## Requirements and compatibility
-
-The current target configuration is:
-
-- BepInEx 6 — Unity Mono build
-- Windows x64
-- Unity 2022.1.24f1 / CLR 4.0 Mono
-- .NET Standard 2.1 engine build target
-- A compatible Unity Mono game with accessible managed assemblies
-
-This is not an IL2CPP engine. IL2CPP support would require a separate compatibility and testing effort.
-
-## Build from source
-
-1. Install a compatible version of Visual Studio with the .NET desktop/development components needed by the solution.
-2. Open `CustomScriptEngine.sln`.
-3. Select the configuration you want to build (`Debug` for testing or `Release` for a release build).
-4. Build the solution.
-5. Find the generated output directory for the `ScriptEngine.BepInEx6.UnityMono` project.
-
-For a Debug build, the output path used by this project is:
+Expected output:
 
 ```text
-CustomScriptEngine\src\ScriptEngine.BepInEx6.UnityMono\bin\Debug\netstandard2.1\
+dist/
+├── Mono/
+│   ├── CustomScriptEngine.dll
+│   ├── ScriptEngine.Core.dll
+│   ├── Microsoft.CodeAnalysis.dll             (plus copied runtime dependencies)
+│   └── INSTALL.txt
+└── IL2CPP/
+    ├── CustomScriptEngine.IL2CPP.dll
+    ├── ScriptEngine.Core.dll
+    ├── Microsoft.CodeAnalysis.dll             (plus copied runtime dependencies)
+    └── INSTALL.txt
 ```
 
-If you build in Release mode, use the corresponding `Release` output directory instead. The exact output location can vary if the project configuration has been changed.
+The exact set of Roslyn dependency DLLs depends on package restore/runtime assets. The deployment targets exclude platform assemblies such as BepInEx, UnityEngine, Mono, Il2CppInterop, Il2Cppmscorlib and Il2CppSystem; the game supplies those at runtime.
 
-## Install into a game
+## Install the Mono build
 
-The engine's deployment folder should be:
+Copy the **contents** of `dist/Mono/` to:
 
 ```text
-<Game>\BepInEx\plugins\CustomScriptEngine\
+<Game>/BepInEx/plugins/CustomScriptEngine/
 ```
 
-Copy the engine DLL and the runtime dependency DLLs produced in the project's build output into that folder.
+Source scripts stay under `BepInEx/scripts/`. The existing Mono engine compiles eligible `.cs` files in that directory and its subfolders (including `shared/`) together into one project assembly.
 
-If you are unsure which generated DLLs are dependencies, the desktop installer can copy the DLL files from the selected build output directory into `BepInEx\plugins\CustomScriptEngine\`. It must not copy unrelated files from other directories, and it must not bundle BepInEx or Unity platform assemblies that are supplied by the game/BepInEx runtime.
+## Install the IL2CPP build
 
-Example layout:
+Copy the **contents** of `dist/IL2CPP/` to:
 
 ```text
-<Game>\
-└─ BepInEx\
-   ├─ plugins\
-   │  └─ CustomScriptEngine\
-   │     ├─ ScriptEngine.BepInEx6.UnityMono.dll
-   │     └─ [other required engine dependency DLLs]
-   └─ scripts\
-      ├─ [your script].cs
-      ├─ [optional script manifest].json
-      ├─ libs\
-      │  └─ [optional manually supplied reference DLLs]
-      └─ reference-cache.txt
+<Game>/BepInEx/plugins/CustomScriptEngine/
 ```
 
-The desktop app should create `BepInEx\plugins\CustomScriptEngine\` when needed and copy the selected, verified engine files there. It should not overwrite existing files silently; show the source, destination, and file list and ask for confirmation first.
-
-Do not copy the entire game `Managed` directory or the whole `BepInEx\core` directory into the engine plugin folder. Those assemblies are references supplied by the game or BepInEx, not engine deployment files.
-
-## Script folder
-
-On first launch, the engine creates or uses:
+The IL2CPP game must use a compatible BepInEx 6 IL2CPP installation. Scripts stay under the separate path:
 
 ```text
-<Game>\BepInEx\scripts\
+<Game>/BepInEx/scripts-il2cpp/
+├── ExampleScript.cs
+├── shared/
+├── libs/
+├── examples/
+├── .cache/
+└── reference-cache.txt
 ```
 
-Place user-created `.cs` scripts there. Optional script manifests and manually supplied reference DLLs can be placed beside the scripts or in `scripts\libs\`, as supported by the engine configuration.
+This intentionally uses `scripts-il2cpp`, rather than a subfolder of `scripts`, so the Mono loader cannot accidentally compile IL2CPP-only scripts and vice versa.
 
-The engine writes its discovered assembly paths to:
+### IL2CPP script contract
 
-```text
-<Game>\BepInEx\scripts\reference-cache.txt
+IL2CPP runtime scripts are ordinary managed classes implementing `CustomScriptEngine.Core.ICustomScriptEntry`:
+
+```csharp
+using CustomScriptEngine.Core;
+using UnityEngine;
+
+public sealed class ExampleScript : ICustomScriptEntry, ICustomScriptUpdate
+{
+    private ICustomScriptContext? _context;
+
+    public void OnLoad(ICustomScriptContext context)
+    {
+        _context = context;
+        context.LogInfo("Script started");
+    }
+
+    public void OnUpdate()
+    {
+        if (Input.GetKeyDown(KeyCode.F10))
+            _context?.LogInfo("F10 was pressed");
+    }
+
+    public void OnUnload() => _context?.LogInfo("Script stopped");
+}
 ```
 
-## Important notes
+Supported optional callback interfaces are `ICustomScriptUpdate`, `ICustomScriptLateUpdate`, `ICustomScriptFixedUpdate`, and `ICustomScriptOnGUI`. The engine invokes them from an injected Unity main-thread host. Use Unity/game APIs only from the lifecycle callbacks unless a specific API is documented as thread-safe.
 
-- A successful build does not guarantee compatibility with every Unity Mono game.
-- Use the engine only with games and files you are authorized to modify.
-- Runtime script compilation and hot reload can fail when a script references unavailable assemblies or incompatible game APIs.
-- Mono's default AppDomain cannot truly unload an old user assembly. Reloading may retain some assembly memory over time.
-- Keep a backup of the game and test changes before using them in a main save.
+All eligible source files compile together, so a class in `shared/` can be called from `ExampleScript.cs`. The example under `scripts-il2cpp/examples/SharedProject/` is excluded from compilation until copied out of `examples/`.
 
-## Source and release integrity
+## Important limitations
 
-Only download release files from the project's verified release source. Before installing, check the release version and compatibility. Where a trusted checksum or signature is published, verify it. If the source or file integrity cannot be verified, do not install the files.
+- Build output separation does not make one plugin DLL compatible with both backends. Mono and IL2CPP have different plugin entry APIs; install the correct build.
+- The IL2CPP plugin project compiles against `BepInEx.Unity.IL2CPP` `6.0.0-be.788` and uses the target game's generated `BepInEx/interop/Il2Cppmscorlib.dll`, `UnityEngine.CoreModule.dll`, and `UnityEngine.InputLegacyModule.dll`. `Il2Cppmscorlib.dll` is required for the IL2CPP `Object` type used by the injected `MonoBehaviour` host. Run a compatible BepInEx IL2CPP game at least once to generate these proxies before building. This is safer than using ordinary Unity Mono module assemblies for the injected IL2CPP `MonoBehaviour` host.
+- IL2CPP's source script project needs reference assemblies available in `BepInEx/interop`, BepInEx `core`/`plugins`, and `scripts-il2cpp/libs`. Missing or incompatible references will produce compiler diagnostics.
+- The IL2CPP runtime script path requires a public parameterless class implementing `ICustomScriptEntry`. A helper-only file compiles but doesn't execute by itself.
+- Runtime assembly loading is not the same as unloading. Reload stops script callbacks, but assemblies loaded from bytes into the default load context remain resident; repeated reload can increase memory usage. Restart the game after many reloads if necessary.
+- Compilation success does not guarantee runtime/gameplay correctness. Test on a backup/offline environment first.
+- This environment does not include the .NET SDK, so the package can be structurally checked here but the actual build must be verified on the Windows development machine.
+
+## One build, two destinations
+
+- `dist/Mono/` contains the Mono plugin and its managed runtime dependencies.
+- `dist/IL2CPP/` contains the IL2CPP plugin and its managed runtime dependencies.
+
+The root `Build-Both.bat` / `Build-Both.ps1` invokes the solution build once and verifies that both output DLLs exist. It needs the root directory of an installed IL2CPP game to reference its generated proxy assemblies; this is a build-time reference only and those game-specific DLLs are not copied into either deployment folder.

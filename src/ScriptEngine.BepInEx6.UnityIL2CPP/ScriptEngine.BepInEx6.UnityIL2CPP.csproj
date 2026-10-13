@@ -1,0 +1,65 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net6.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <AssemblyName>CustomScriptEngine.IL2CPP</AssemblyName>
+    <RootNamespace>CustomScriptEngine.BepInEx6.UnityIL2CPP</RootNamespace>
+    <OutputType>Library</OutputType>
+    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+    <BaseOutputPath>$(MSBuildThisFileDirectory)..\..\artifacts\build\IL2CPP\</BaseOutputPath>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <AppendRuntimeIdentifierToOutputPath>false</AppendRuntimeIdentifierToOutputPath>
+    <DeploymentOutputDirectory>$(MSBuildThisFileDirectory)..\..\dist\IL2CPP</DeploymentOutputDirectory>
+    <!-- GameDir is the installed IL2CPP game's root. Its BepInEx/interop assemblies
+         are the generated proxy assemblies required to compile Unity callbacks. -->
+    <GameDir Condition="'$(GameDir)' == '' and '$(CSE_IL2CPP_GAME_DIR)' != ''">$(CSE_IL2CPP_GAME_DIR)</GameDir>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\ScriptEngine.Core\ScriptEngine.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="BepInEx.Unity.IL2CPP" Version="6.0.0-be.788" IncludeAssets="compile;build;buildTransitive" PrivateAssets="all" />
+    <!-- Reference this game's generated IL2CPP proxy assemblies, not ordinary Unity Mono DLLs. -->
+    <!-- IL2CPP proxy types inherit from Il2Cppmscorlib.Object; it must be a compile reference. -->
+    <Reference Include="Il2Cppmscorlib">
+      <HintPath>$(GameDir)\BepInEx\interop\Il2Cppmscorlib.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.CoreModule">
+      <HintPath>$(GameDir)\BepInEx\interop\UnityEngine.CoreModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.InputLegacyModule">
+      <HintPath>$(GameDir)\BepInEx\interop\UnityEngine.InputLegacyModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+  <Target Name="ValidateIL2CPPGameReferences" BeforeTargets="ResolveReferences">
+    <Error Condition="'$(GameDir)' == ''" Text="IL2CPP build requires GameDir. Run Build-Both.bat/Build-Both.ps1 and select an IL2CPP game root with BepInEx installed, or pass -p:GameDir=&quot;C:\Path\To\Game&quot;." />
+    <Error Condition="!Exists('$(GameDir)\BepInEx\interop\Il2Cppmscorlib.dll')" Text="Missing IL2CPP proxy reference: $(GameDir)\BepInEx\interop\Il2Cppmscorlib.dll. Run the game with compatible BepInEx IL2CPP once so it generates BepInEx\interop, then rebuild." />
+    <Error Condition="!Exists('$(GameDir)\BepInEx\interop\UnityEngine.CoreModule.dll')" Text="Missing IL2CPP proxy reference: $(GameDir)\BepInEx\interop\UnityEngine.CoreModule.dll. Run the game with compatible BepInEx IL2CPP once so it generates BepInEx\interop, then rebuild." />
+    <Error Condition="!Exists('$(GameDir)\BepInEx\interop\UnityEngine.InputLegacyModule.dll')" Text="Missing IL2CPP proxy reference: $(GameDir)\BepInEx\interop\UnityEngine.InputLegacyModule.dll. This engine's F6 reload hotkey currently uses UnityEngine.Input; select a game whose BepInEx IL2CPP setup generated this proxy assembly." />
+  </Target>
+
+  <Target Name="PrepareIL2CPPDeployment" AfterTargets="Build">
+    <ItemGroup>
+      <DeploymentFiles Include="$(TargetDir)*.dll" />
+      <DeploymentFiles Remove="$(TargetDir)BepInEx*.dll" />
+      <DeploymentFiles Remove="$(TargetDir)UnityEngine*.dll" />
+      <DeploymentFiles Remove="$(TargetDir)Unity*.dll" />
+      <DeploymentFiles Remove="$(TargetDir)Mono*.dll" />
+      <DeploymentFiles Remove="$(TargetDir)Il2CppInterop*.dll" />
+      <DeploymentFiles Remove="$(TargetDir)Il2Cppmscorlib.dll" />
+      <DeploymentFiles Remove="$(TargetDir)Il2CppSystem*.dll" />
+    </ItemGroup>
+    <RemoveDir Directories="$(DeploymentOutputDirectory)" />
+    <MakeDir Directories="$(DeploymentOutputDirectory)" />
+    <Copy SourceFiles="@(DeploymentFiles)" DestinationFolder="$(DeploymentOutputDirectory)" SkipUnchangedFiles="true" />
+    <WriteLinesToFile File="$(DeploymentOutputDirectory)\INSTALL.txt" Overwrite="true" Lines="CustomScriptEngine IL2CPP: copy the contents of this folder into BepInEx\plugins\CustomScriptEngine on an IL2CPP game with compatible BepInEx 6. See the root README for script API and limitations." />
+  </Target>
+</Project>

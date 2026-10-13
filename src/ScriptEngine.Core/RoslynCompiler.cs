@@ -7,13 +7,19 @@ using System.Text;
 
 namespace CustomScriptEngine.Core;
 
+/// <summary>
+/// Compiles a set of .cs files into one runtime assembly. Compiling source files
+/// together lets scripts call shared helper classes in other files without manually
+/// compiling/referencing one DLL per script.
+/// </summary>
 public sealed class RoslynCompiler
 {
     private readonly ReferenceResolver _resolver;
 
     public RoslynCompiler(ReferenceResolver resolver) => _resolver = resolver;
 
-    public async Task<CompilationResult> CompileAsync(
+    /// <summary>Compatibility overload for callers that only need to compile one source file.</summary>
+    public Task<CompilationResult> CompileAsync(
         string scriptPath,
         ScriptManifest manifest,
         string outputDirectory,
@@ -21,61 +27,94 @@ public sealed class RoslynCompiler
         IEnumerable<string>? cachedReferenceFiles,
         CancellationToken cancellationToken)
     {
+        return CompileProjectAsync(
+            new[] { new ScriptSourceFile { Path = scriptPath, Manifest = manifest } },
+            scriptPath,
+            outputDirectory,
+            referenceDirectories,
+            cachedReferenceFiles,
+            cancellationToken);
+    }
+
+    public async Task<CompilationResult> CompileProjectAsync(
+        IReadOnlyList<ScriptSourceFile> sourceFiles,
+        string projectPath,
+        string outputDirectory,
+        IEnumerable<string> referenceDirectories,
+        IEnumerable<string>? cachedReferenceFiles,
+        CancellationToken cancellationToken)
+    {
         Directory.CreateDirectory(outputDirectory);
 
-        var source = await File.ReadAllTextAsync(scriptPath, Encoding.UTF8, cancellationToken).ConfigureAwait(false);
-        var sourceText = SourceText.From(source, Encoding.UTF8);
-
-        var parseOptions = new CSharpParseOptions(
-            languageVersion: LanguageVersion.Latest,
-            documentationMode: DocumentationMode.Parse,
-            preprocessorSymbols: manifest.Defines);
-
-        var tree = CSharpSyntaxTree.ParseText(
-            sourceText,
-            parseOptions,
-            scriptPath,
-            cancellationToken: cancellationToken);
-
-        var references = new List<string>();
         var diagnostics = new List<ScriptDiagnostic>();
+        var syntaxTrees = new List<SyntaxTree>();
+        var usableSources = sourceFiles
+            .Where(s => !string.IsNullOrWhiteSpace(s.Path) && File.Exists(s.Path))
+            .OrderBy(s => s.Path, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        if (usableSources.Count == 0)
+        {
+            diagnostics.Add(new ScriptDiagnostic(
+                "Error", "SRC000", "No C# source files were found in the script project.", projectPath, 0, 0));
+            return new CompilationResult { ScriptPath = projectPath, Diagnostics = diagnostics };
+        }
+
+        // Each file retains its own manifest defines for #if blocks. All manifests'
+        // references are combined because every file is emitted into the same assembly.
+        foreach (var source in usableSources)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var manifest = source.Manifest ?? new ScriptManifest();
+            var parseOptions = new CSharpParseOptions(
+                languageVersion: LanguageVersion.Latest,
+                documentationMode: DocumentationMode.Parse,
+                preprocessorSymbols: manifest.Defines ?? new List<string>());
+
+            var text = await File.ReadAllTextAsync(source.Path, Encoding.UTF8, cancellationToken).ConfigureAwait(false);
+            syntaxTrees.Add(CSharpSyntaxTree.ParseText(
+                SourceText.From(text, Encoding.UTF8),
+                parseOptions,
+                Path.GetFullPath(source.Path),
+                cancellationToken: cancellationToken));
+        }
+
+        var referenceDirectoriesList = referenceDirectories.ToList();
+        var references = new List<string>();
         var missing = new List<string>();
 
-        // 1) All assemblies currently loaded in Mono. This is the cheapest and
-        // most reliable way to catch BepInEx, Unity and Assembly-CSharp once the
-        // host plugin has fully attached to Unity.
+        // 1) Assemblies already loaded in the game process.
         AddLoadedAssemblyLocations(references);
 
-        // 2) DLLs declared by manifest/inline metadata or found in configured dirs.
-        references.AddRange(_resolver.Resolve(manifest.References, referenceDirectories, out missing));
+        // 2) Merge references from every script manifest/directive.
+        var requestedReferences = usableSources
+            .SelectMany(s => s.Manifest?.References ?? new List<string>())
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        references.AddRange(_resolver.Resolve(requestedReferences, referenceDirectoriesList, out missing));
 
-        // 3) Startup-generated cache containing game/BepInEx/libs DLLs.
+        // 3) Startup-generated reference cache.
         foreach (var dll in cachedReferenceFiles ?? Array.Empty<string>())
         {
             if (File.Exists(dll) && IsReferenceCandidate(dll))
                 references.Add(Path.GetFullPath(dll));
         }
 
-        // 4) Explicit scripts/libs directory files are always accepted even if
-        // they were added after the cache was created.
-        foreach (var directory in referenceDirectories.Where(Directory.Exists))
+        // 4) Always discover DLLs added manually after startup.
+        foreach (var directory in referenceDirectoriesList.Where(Directory.Exists))
         {
             try
             {
-                references.AddRange(Directory.EnumerateFiles(
-                    directory,
-                    "*.dll",
-                    SearchOption.TopDirectoryOnly));
+                references.AddRange(Directory.EnumerateFiles(directory, "*.dll", SearchOption.TopDirectoryOnly));
             }
             catch
             {
-                // Ignore inaccessible dirs.
+                // Ignore inaccessible directories; other reference sources may still work.
             }
         }
 
         var metadata = new List<MetadataReference>();
-        var usableReferencePaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
         foreach (var path in references
                      .Where(File.Exists)
                      .Select(Path.GetFullPath)
@@ -84,17 +123,11 @@ public sealed class RoslynCompiler
             try
             {
                 metadata.Add(MetadataReference.CreateFromFile(path));
-                usableReferencePaths.Add(path);
             }
             catch (Exception ex)
             {
                 diagnostics.Add(new ScriptDiagnostic(
-                    "Warning",
-                    "REF001",
-                    $"Could not read reference '{path}': {ex.Message}",
-                    path,
-                    0,
-                    0));
+                    "Warning", "REF001", $"Could not read reference '{path}': {ex.Message}", path, 0, 0));
             }
         }
 
@@ -104,16 +137,16 @@ public sealed class RoslynCompiler
                 "Error",
                 "REF002",
                 $"Missing reference '{missingReference}'. Put the DLL in scripts/libs, add it to the cache, or declare a valid manifest/inline reference.",
-                scriptPath,
+                projectPath,
                 0,
                 0));
         }
 
-        // Unity Mono game assemblies are generally based on .NET Framework/Mono.
-        // We intentionally use the newest C# syntax Roslyn can parse, but do not
-        // emit framework types from the build host into the user's script unless
-        // their own references require them.
-        var assemblyName = Path.GetFileNameWithoutExtension(scriptPath) + "." + Guid.NewGuid().ToString("N");
+        var assemblyBaseName = Path.GetFileNameWithoutExtension(projectPath);
+        if (string.IsNullOrWhiteSpace(assemblyBaseName))
+            assemblyBaseName = "CustomScriptProject";
+
+        var assemblyName = assemblyBaseName + "." + Guid.NewGuid().ToString("N");
         var compilationOptions = new CSharpCompilationOptions(
             OutputKind.DynamicallyLinkedLibrary,
             optimizationLevel: OptimizationLevel.Debug,
@@ -126,14 +159,13 @@ public sealed class RoslynCompiler
 
         var compilation = CSharpCompilation.Create(
             assemblyName,
-            new[] { tree },
+            syntaxTrees,
             metadata,
             compilationOptions);
 
-        var baseName = Path.GetFileNameWithoutExtension(scriptPath);
         var token = Guid.NewGuid().ToString("N");
-        var dllPath = Path.Combine(outputDirectory, $"{baseName}.{token}.dll");
-        var pdbPath = Path.Combine(outputDirectory, $"{baseName}.{token}.pdb");
+        var dllPath = Path.Combine(outputDirectory, $"{assemblyBaseName}.{token}.dll");
+        var pdbPath = Path.Combine(outputDirectory, $"{assemblyBaseName}.{token}.pdb");
 
         await using (var dllStream = new FileStream(dllPath, FileMode.Create, FileAccess.Write, FileShare.None))
         await using (var pdbStream = new FileStream(pdbPath, FileMode.Create, FileAccess.Write, FileShare.None))
@@ -158,7 +190,7 @@ public sealed class RoslynCompiler
 
         return new CompilationResult
         {
-            ScriptPath = scriptPath,
+            ScriptPath = projectPath,
             AssemblyPath = dllPath,
             PdbPath = pdbPath,
             Diagnostics = diagnostics
@@ -180,7 +212,7 @@ public sealed class RoslynCompiler
             }
             catch
             {
-                // Dynamic/in-memory assemblies can throw on Location.
+                // Dynamic/in-memory assemblies may throw when Location is queried.
             }
         }
     }
@@ -188,18 +220,10 @@ public sealed class RoslynCompiler
     private static bool IsReferenceCandidate(string path)
     {
         var name = Path.GetFileName(path);
-
-        // Never feed Roslyn's own implementation assemblies back into a game
-        // script unless a script explicitly requests them. Framework references
-        // are already supplied by the loaded runtime.
         if (name.StartsWith("Microsoft.CodeAnalysis", StringComparison.OrdinalIgnoreCase))
             return false;
-
-        if (name.Equals("csc.dll", StringComparison.OrdinalIgnoreCase) ||
-            name.Equals("vbc.dll", StringComparison.OrdinalIgnoreCase))
-            return false;
-
-        return true;
+        return !name.Equals("csc.dll", StringComparison.OrdinalIgnoreCase)
+            && !name.Equals("vbc.dll", StringComparison.OrdinalIgnoreCase);
     }
 
     private static ScriptDiagnostic ToScriptDiagnostic(Diagnostic diagnostic)
@@ -208,22 +232,12 @@ public sealed class RoslynCompiler
         var line = lineSpan.StartLinePosition.Line + 1;
         var column = lineSpan.StartLinePosition.Character + 1;
         var file = string.IsNullOrWhiteSpace(lineSpan.Path) ? null : lineSpan.Path;
-        return new ScriptDiagnostic(
-            diagnostic.Severity.ToString(),
-            diagnostic.Id,
-            diagnostic.GetMessage(),
-            file,
-            line,
-            column);
+        return new ScriptDiagnostic(diagnostic.Severity.ToString(), diagnostic.Id, diagnostic.GetMessage(), file, line, column);
     }
 
     private static void TryDelete(string path)
     {
-        try
-        {
-            if (File.Exists(path))
-                File.Delete(path);
-        }
+        try { if (File.Exists(path)) File.Delete(path); }
         catch { }
     }
 }

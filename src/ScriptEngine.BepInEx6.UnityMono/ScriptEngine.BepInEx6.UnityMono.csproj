@@ -8,6 +8,10 @@
     <RootNamespace>CustomScriptEngine.BepInEx6.UnityMono</RootNamespace>
     <OutputType>Library</OutputType>
     <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+    <BaseOutputPath>$(MSBuildThisFileDirectory)..\..\artifacts\build\Mono\</BaseOutputPath>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <AppendRuntimeIdentifierToOutputPath>false</AppendRuntimeIdentifierToOutputPath>
+    <DeploymentOutputDirectory>$(MSBuildThisFileDirectory)..\..\dist\Mono</DeploymentOutputDirectory>
   </PropertyGroup>
 
   <ItemGroup>
@@ -19,21 +23,20 @@
     <PackageReference Include="BepInEx.Unity.Mono" Version="6.0.0-be.788" IncludeAssets="compile;build;buildTransitive" PrivateAssets="all" />
     <PackageReference Include="UnityEngine.Modules" Version="2022.1.24" IncludeAssets="compile" PrivateAssets="all" />
   </ItemGroup>
-  <!-- Build a self-contained deployment folder for the plugin. For runtime testing,
-       copy the entire Deployment folder instead of chasing missing dependency DLLs. -->
-  <Target Name="PrepareDeployment" AfterTargets="Build">
-    <PropertyGroup>
-      <DeploymentDir>$(TargetDir)Deployment</DeploymentDir>
-    </PropertyGroup>
-    <MakeDir Directories="$(DeploymentDir)" />
+  <!-- A single solution build prepares a Mono-only deployment directory. -->
+  <Target Name="PrepareMonoDeployment" AfterTargets="Build">
     <ItemGroup>
       <DeploymentFiles Include="$(TargetDir)*.dll" />
       <DeploymentFiles Remove="$(TargetDir)BepInEx*.dll" />
       <DeploymentFiles Remove="$(TargetDir)UnityEngine*.dll" />
       <DeploymentFiles Remove="$(TargetDir)Unity*.dll" />
       <DeploymentFiles Remove="$(TargetDir)Mono*.dll" />
+      <DeploymentFiles Remove="$(TargetDir)Il2CppInterop*.dll" />
     </ItemGroup>
-    <Copy SourceFiles="@(DeploymentFiles)" DestinationFolder="$(DeploymentDir)" SkipUnchangedFiles="true" />
+    <RemoveDir Directories="$(DeploymentOutputDirectory)" />
+    <MakeDir Directories="$(DeploymentOutputDirectory)" />
+    <Copy SourceFiles="@(DeploymentFiles)" DestinationFolder="$(DeploymentOutputDirectory)" SkipUnchangedFiles="true" />
+    <WriteLinesToFile File="$(DeploymentOutputDirectory)\INSTALL.txt" Overwrite="true" Lines="CustomScriptEngine Mono: copy the contents of this folder into BepInEx\plugins\CustomScriptEngine on a compatible BepInEx 6 Unity Mono game. See the root README for scripts usage." />
   </Target>
 
 </Project>

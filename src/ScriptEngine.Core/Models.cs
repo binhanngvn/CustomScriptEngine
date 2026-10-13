@@ -11,6 +11,13 @@ public sealed class ScriptManifest
     public bool? AutoReload { get; set; }
 }
 
+/// <summary>A source file that participates in the shared runtime script project.</summary>
+public sealed class ScriptSourceFile
+{
+    public string Path { get; set; } = string.Empty;
+    public ScriptManifest Manifest { get; set; } = new();
+}
+
 public sealed class ScriptDiagnostic
 {
     public string Severity { get; set; } = string.Empty;
@@ -35,6 +42,7 @@ public sealed class ScriptDiagnostic
 
 public sealed class CompilationResult
 {
+    /// <summary>Logical path identifying the whole script project, not necessarily a physical .cs file.</summary>
     public string ScriptPath { get; set; } = string.Empty;
     public string AssemblyPath { get; set; } = string.Empty;
     public string PdbPath { get; set; } = string.Empty;

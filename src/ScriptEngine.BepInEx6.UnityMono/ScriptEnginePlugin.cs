@@ -14,7 +14,7 @@ public sealed class ScriptEnginePlugin : BaseUnityPlugin
 {
     public const string GUID = "com.custom.scriptengine.bepinex6.unitymono";
     public const string NAME = "Custom Script Engine";
-    public const string VERSION = "2.0.0";
+    public const string VERSION = "3.0.0";
 
     private readonly ConcurrentQueue<Action> _mainThreadActions = new();
     private ScriptEngineService? _service;
@@ -29,14 +29,16 @@ public sealed class ScriptEnginePlugin : BaseUnityPlugin
         var scripts = Path.Combine(Paths.BepInExRootPath, "scripts");
         var cache = Path.Combine(scripts, ".cache");
         var libs = Path.Combine(scripts, "libs");
+        var shared = Path.Combine(scripts, "shared");
         var referenceCache = Path.Combine(scripts, "reference-cache.txt");
 
         Directory.CreateDirectory(scripts);
         Directory.CreateDirectory(cache);
         Directory.CreateDirectory(libs);
+        Directory.CreateDirectory(shared);
 
-        _reloadKey = Config.Bind("General", "ReloadKey", KeyCode.F6, "Reload all .cs scripts.");
-        _watcherEnabled = Config.Bind("General", "EnableFileSystemWatcher", true, "Automatically compile .cs files after they are saved.");
+        _reloadKey = Config.Bind("General", "ReloadKey", KeyCode.F6, "Recompile and reload the whole shared .cs script project.");
+        _watcherEnabled = Config.Bind("General", "EnableFileSystemWatcher", true, "Automatically rebuild the shared script project after source files are saved.");
         _debounce = Config.Bind("General", "AutoReloadDelay", 0.35f, "Debounce delay before compiling after a file change.");
         _autoDiscoverReferences = Config.Bind("General", "AutoDiscoverReferences", true, "At game/plugin startup, scan game Managed + BepInEx core/plugins + scripts/libs and save absolute DLL paths to reference-cache.txt.");
 
@@ -53,14 +55,14 @@ public sealed class ScriptEnginePlugin : BaseUnityPlugin
         _service.CompilationFinished += result =>
         {
             if (result.Success)
-                Logger.LogInfo($"Compiled {Path.GetFileName(result.ScriptPath)} successfully.");
+                Logger.LogInfo("Compiled shared script project successfully.");
             else
-                Logger.LogError($"Compilation failed: {Path.GetFileName(result.ScriptPath)}");
+                Logger.LogError("Compilation failed for the shared script project; previous version remains active.");
         };
         _service.ProcessingError += (path, ex) => Logger.LogError($"{path}: {ex}");
         _service.CompilationSucceeded += (scriptPath, assemblyPath) =>
             _mainThreadActions.Enqueue(() => ActivateCompiledScript(scriptPath, assemblyPath));
-        _service.Deleted += scriptPath => _mainThreadActions.Enqueue(() => RemoveScript(scriptPath));
+        _service.ProjectCleared += projectPath => _mainThreadActions.Enqueue(() => RemoveScript(projectPath));
 
         var discoveryDirectories = FindReferenceDiscoveryDirectories(Paths.GameRootPath);
         discoveryDirectories.Add(Path.Combine(Paths.BepInExRootPath, "core"));
@@ -80,7 +82,8 @@ public sealed class ScriptEnginePlugin : BaseUnityPlugin
         Logger.LogInfo($"{NAME} {VERSION} loaded.");
         Logger.LogInfo($"Scripts folder: {scripts}");
         Logger.LogInfo($"Reference cache: {referenceCache}");
-        Logger.LogInfo("Put .cs files there and save them. The engine compiles in the background.");
+        Logger.LogInfo("Put .cs files in scripts/ or scripts/shared/. All eligible files compile together, so classes can call helpers in other files.");
+        Logger.LogInfo("Changing any source file reloads the whole shared script project. Files in libs/, examples/ and .cache/ are not compiled as source.");
 
         // Initial scan after the plugin is fully attached to Unity.
         _mainThreadActions.Enqueue(() =>
@@ -127,7 +130,7 @@ public sealed class ScriptEnginePlugin : BaseUnityPlugin
         try
         {
             var loaded = CreateRuntimeIfNeeded().Load(scriptPath, assemblyPath);
-            Logger.LogInfo($"Reloaded {Path.GetFileName(scriptPath)} ({loaded.PluginInstances.Count} plugin instance(s)).");
+            Logger.LogInfo($"Reloaded shared script project ({loaded.PluginInstances.Count} plugin instance(s) across all source files).");
         }
         catch (Exception ex)
         {
@@ -141,7 +144,7 @@ public sealed class ScriptEnginePlugin : BaseUnityPlugin
         {
             CreateRuntimeIfNeeded().Unload(scriptPath);
             _service?.ForgetScript(scriptPath);
-            Logger.LogInfo($"Removed script {Path.GetFileName(scriptPath)}.");
+            Logger.LogInfo("Unloaded the shared script project because no .cs source files remain.");
         }
         catch (Exception ex)
         {

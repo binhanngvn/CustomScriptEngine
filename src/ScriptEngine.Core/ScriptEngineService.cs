@@ -1,12 +1,17 @@
 namespace CustomScriptEngine.Core;
 
+/// <summary>
+/// Manages one shared C# script project rooted at BepInEx/scripts.
+/// Every eligible .cs file is compiled together into one assembly, which lets
+/// source files call each other's types without manual DLL references.
+/// </summary>
 public sealed class ScriptEngineService : IDisposable
 {
     private readonly RoslynCompiler _compiler;
     private readonly string _scriptDirectory;
     private readonly string _cacheDirectory;
     private readonly List<string> _referenceDirectories = new();
-    private readonly Dictionary<string, DateTime> _lastReloadRequest = new(StringComparer.OrdinalIgnoreCase);
+    private long _requestVersion;
     private readonly Dictionary<string, string> _lastCompiledAssembly = new(StringComparer.OrdinalIgnoreCase);
     private FileSystemWatcher? _watcher;
     private readonly CancellationTokenSource _lifetime = new();
@@ -15,20 +20,25 @@ public sealed class ScriptEngineService : IDisposable
     private IReadOnlyList<string> _cachedReferenceFiles = Array.Empty<string>();
     private string? _referenceCachePath;
     private List<string> _discoveryDirectories = new();
+    private readonly string _projectKeyPath;
 
     public event Action<CompilationResult>? CompilationFinished;
     public event Action<string, string>? CompilationSucceeded;
     public event Action<string>? Deleted;
+    public event Action<string>? ProjectCleared;
     public event Action<string, Exception>? ProcessingError;
     public event Action<string>? Log;
 
     public bool Watching { get; private set; }
     public IReadOnlyList<string> CachedReferenceFiles => _cachedReferenceFiles;
+    /// <summary>Stable logical key used for the combined script project (not a physical source file).</summary>
+    public string ProjectKeyPath => _projectKeyPath;
 
     public ScriptEngineService(string scriptDirectory, string cacheDirectory, double debounceSeconds = 0.35)
     {
         _scriptDirectory = Path.GetFullPath(scriptDirectory);
         _cacheDirectory = Path.GetFullPath(cacheDirectory);
+        _projectKeyPath = Path.Combine(_cacheDirectory, "__SharedScriptProject__.cs");
         _debounceSeconds = Math.Max(0.05, debounceSeconds);
         Directory.CreateDirectory(_scriptDirectory);
         Directory.CreateDirectory(_cacheDirectory);
@@ -113,11 +123,56 @@ public sealed class ScriptEngineService : IDisposable
             _referenceDirectories.Add(full);
     }
 
+    /// <summary>
+    /// Lists source files compiled into the shared project. shared/ and other source
+    /// folders are included. Internal/cache/library/example folders are excluded.
+    /// </summary>
     public IReadOnlyList<string> GetScripts()
     {
-        return Directory.EnumerateFiles(_scriptDirectory, "*.cs", SearchOption.AllDirectories)
-            .Where(p => !IsInsideCache(p))
-            .ToList();
+        try
+        {
+            return Directory.EnumerateFiles(_scriptDirectory, "*.cs", SearchOption.AllDirectories)
+                .Where(IsCompilableSource)
+                .Select(Path.GetFullPath)
+                .OrderBy(p => p, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+        catch (Exception ex)
+        {
+            // Fail closed: a scan failure must not be mistaken for an empty project,
+            // otherwise the currently active script project could be unloaded.
+            WriteLog($"Could not enumerate scripts; keeping the current project active: {ex.Message}");
+            throw;
+        }
+    }
+
+    private bool IsCompilableSource(string path)
+    {
+        var full = Path.GetFullPath(path);
+        if (IsInsideCache(full) || !IsUnderScriptDirectory(full))
+            return false;
+
+        var relative = Path.GetRelativePath(_scriptDirectory, full);
+        var segments = relative.Split(new[] { Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar }, StringSplitOptions.RemoveEmptyEntries);
+        foreach (var segment in segments.Take(Math.Max(0, segments.Length - 1)))
+        {
+            if (segment.Equals("libs", StringComparison.OrdinalIgnoreCase)
+                || segment.Equals("examples", StringComparison.OrdinalIgnoreCase)
+                || segment.Equals("bin", StringComparison.OrdinalIgnoreCase)
+                || segment.Equals("obj", StringComparison.OrdinalIgnoreCase)
+                || segment.Equals(".git", StringComparison.OrdinalIgnoreCase))
+                return false;
+        }
+
+        return true;
+    }
+
+    private bool IsUnderScriptDirectory(string path)
+    {
+        var full = Path.GetFullPath(path);
+        var root = _scriptDirectory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+            + Path.DirectorySeparatorChar;
+        return full.StartsWith(root, StringComparison.OrdinalIgnoreCase);
     }
 
     public void StartWatcher()
@@ -140,7 +195,7 @@ public sealed class ScriptEngineService : IDisposable
         _watcher.Deleted += OnFileChanged;
         _watcher.Renamed += OnFileRenamed;
         Watching = true;
-        WriteLog("File watcher enabled.");
+        WriteLog("File watcher enabled. Any eligible .cs file rebuilds the shared script project.");
     }
 
     public void StopWatcher()
@@ -158,62 +213,101 @@ public sealed class ScriptEngineService : IDisposable
         Watching = false;
     }
 
-    public void ReloadAll()
-    {
-        foreach (var script in GetScripts())
-            RequestCompile(script);
-    }
+    public void ReloadAll() => RequestProjectCompile();
 
+    /// <summary>Request a shared-project rebuild after any source file changes.</summary>
     public void Reload(string scriptPath)
     {
-        var full = Path.GetFullPath(scriptPath);
-        if (!File.Exists(full) || !string.Equals(Path.GetExtension(full), ".cs", StringComparison.OrdinalIgnoreCase))
+        if (string.IsNullOrWhiteSpace(scriptPath))
             return;
-        RequestCompile(full);
+
+        var full = Path.GetFullPath(scriptPath);
+        if (!IsUnderScriptDirectory(full) || !string.Equals(Path.GetExtension(full), ".cs", StringComparison.OrdinalIgnoreCase))
+            return;
+
+        // A script is no longer a separately compiled unit; every source file shares one assembly.
+        RequestProjectCompile();
     }
 
     public bool TryGetLastCompiledAssembly(string scriptPath, out string? assemblyPath)
     {
+        var key = NormalizeProjectKey(scriptPath);
         lock (_reloadLock)
-            return _lastCompiledAssembly.TryGetValue(Path.GetFullPath(scriptPath), out assemblyPath);
+            return _lastCompiledAssembly.TryGetValue(key, out assemblyPath);
     }
 
     public void ForgetScript(string scriptPath)
     {
-        var full = Path.GetFullPath(scriptPath);
+        var key = NormalizeProjectKey(scriptPath);
         lock (_reloadLock)
-            _lastCompiledAssembly.Remove(full);
+            _lastCompiledAssembly.Remove(key);
     }
 
-    private void RequestCompile(string scriptPath)
+    private string NormalizeProjectKey(string path)
     {
-        var full = Path.GetFullPath(scriptPath);
-        lock (_reloadLock)
-            _lastReloadRequest[full] = DateTime.UtcNow;
+        if (string.IsNullOrWhiteSpace(path))
+            return _projectKeyPath;
 
-        _ = CompileInBackgroundAsync(full, _lifetime.Token);
+        var full = Path.GetFullPath(path);
+        return string.Equals(full, _projectKeyPath, StringComparison.OrdinalIgnoreCase) || IsUnderScriptDirectory(full)
+            ? _projectKeyPath
+            : full;
     }
 
-    private async Task CompileInBackgroundAsync(string scriptPath, CancellationToken cancellationToken)
+    private void RequestProjectCompile()
+    {
+        long requestVersion;
+        lock (_reloadLock)
+            requestVersion = ++_requestVersion;
+
+        _ = CompileProjectInBackgroundAsync(requestVersion, _lifetime.Token);
+    }
+
+    private async Task CompileProjectInBackgroundAsync(long requestVersion, CancellationToken cancellationToken)
     {
         try
         {
             await Task.Delay(TimeSpan.FromSeconds(_debounceSeconds), cancellationToken).ConfigureAwait(false);
 
-            DateTime requestTime;
             lock (_reloadLock)
             {
-                if (!_lastReloadRequest.TryGetValue(scriptPath, out requestTime))
+                if (_requestVersion != requestVersion)
                     return;
             }
 
-            if (!File.Exists(scriptPath))
-                return;
+            var scriptPaths = GetScripts();
+            if (scriptPaths.Count == 0)
+            {
+                string? previous;
+                lock (_reloadLock)
+                {
+                    if (_requestVersion != requestVersion)
+                        return;
+                    _lastCompiledAssembly.TryGetValue(_projectKeyPath, out previous);
+                    _lastCompiledAssembly.Remove(_projectKeyPath);
+                }
 
-            var manifest = InlineMetadata.Apply(scriptPath, ManifestReader.LoadForScript(scriptPath));
-            var result = await _compiler.CompileAsync(
-                scriptPath,
-                manifest,
+                if (!string.IsNullOrWhiteSpace(previous))
+                {
+                    TryDelete(previous);
+                    TryDelete(Path.ChangeExtension(previous, ".pdb"));
+                }
+
+                ProjectCleared?.Invoke(_projectKeyPath);
+                WriteLog("No .cs source files remain; the shared script project was cleared.");
+                return;
+            }
+
+            var sourceFiles = new List<ScriptSourceFile>(scriptPaths.Count);
+            foreach (var path in scriptPaths)
+            {
+                var manifest = InlineMetadata.Apply(path, ManifestReader.LoadForScript(path));
+                sourceFiles.Add(new ScriptSourceFile { Path = path, Manifest = manifest });
+            }
+
+            var result = await _compiler.CompileProjectAsync(
+                sourceFiles,
+                _projectKeyPath,
                 _cacheDirectory,
                 _referenceDirectories,
                 _cachedReferenceFiles,
@@ -228,61 +322,60 @@ public sealed class ScriptEngineService : IDisposable
 
             if (!result.Success)
             {
-                WriteLog($"Compilation failed for {Path.GetFileName(scriptPath)}. The previous version is kept.");
+                WriteLog($"Compilation failed for the shared script project ({scriptPaths.Count} source file(s)). The previous version remains active.");
                 return;
             }
 
             lock (_reloadLock)
             {
-                if (!_lastReloadRequest.TryGetValue(scriptPath, out var latest) || latest != requestTime)
+                if (_requestVersion != requestVersion)
                 {
                     TryDelete(result.AssemblyPath);
                     TryDelete(result.PdbPath);
                     return;
                 }
 
-                if (_lastCompiledAssembly.TryGetValue(scriptPath, out var previousPath) &&
+                if (_lastCompiledAssembly.TryGetValue(_projectKeyPath, out var previousPath) &&
                     !string.Equals(previousPath, result.AssemblyPath, StringComparison.OrdinalIgnoreCase))
                 {
                     TryDelete(previousPath);
                     TryDelete(Path.ChangeExtension(previousPath, ".pdb"));
                 }
 
-                _lastCompiledAssembly[scriptPath] = result.AssemblyPath;
+                _lastCompiledAssembly[_projectKeyPath] = result.AssemblyPath;
             }
 
-            CompilationSucceeded?.Invoke(scriptPath, result.AssemblyPath);
+            WriteLog($"Compiled {scriptPaths.Count} source file(s) into one shared runtime assembly.");
+            CompilationSucceeded?.Invoke(_projectKeyPath, result.AssemblyPath);
         }
         catch (OperationCanceledException)
         {
         }
         catch (Exception ex)
         {
-            ProcessingError?.Invoke(scriptPath, ex);
-            WriteLog($"Script processing failed for {scriptPath}: {ex}");
+            ProcessingError?.Invoke(_projectKeyPath, ex);
+            WriteLog($"Shared script project processing failed: {ex}");
         }
     }
 
     private void OnFileChanged(object sender, FileSystemEventArgs e)
     {
-        if (IsInsideCache(e.FullPath))
+        if (IsInsideCache(e.FullPath) || !IsUnderScriptDirectory(Path.GetFullPath(e.FullPath)))
             return;
 
         var ext = Path.GetExtension(e.FullPath);
         if (ext.Equals(".cs", StringComparison.OrdinalIgnoreCase))
         {
-            if (e.ChangeType == WatcherChangeTypes.Deleted)
-                Deleted?.Invoke(Path.GetFullPath(e.FullPath));
-            else
-                Reload(e.FullPath);
+            if (IsCompilableSource(e.FullPath))
+                RequestProjectCompile();
             return;
         }
 
-        if (e.FullPath.EndsWith(".script.json", StringComparison.OrdinalIgnoreCase))
+        var name = Path.GetFileName(e.FullPath);
+        if (name.EndsWith(".script.json", StringComparison.OrdinalIgnoreCase)
+            || name.Equals("script.json", StringComparison.OrdinalIgnoreCase))
         {
-            var script = e.FullPath.Substring(0, e.FullPath.Length - ".script.json".Length) + ".cs";
-            if (File.Exists(script))
-                Reload(script);
+            RequestProjectCompile();
             return;
         }
 
@@ -292,9 +385,13 @@ public sealed class ScriptEngineService : IDisposable
 
     private void OnFileRenamed(object sender, RenamedEventArgs e)
     {
-        if (e.OldFullPath.EndsWith(".cs", StringComparison.OrdinalIgnoreCase))
-            Deleted?.Invoke(Path.GetFullPath(e.OldFullPath));
         OnFileChanged(sender, e);
+        if (e.OldFullPath.EndsWith(".cs", StringComparison.OrdinalIgnoreCase)
+            || e.OldFullPath.EndsWith(".script.json", StringComparison.OrdinalIgnoreCase)
+            || Path.GetFileName(e.OldFullPath).Equals("script.json", StringComparison.OrdinalIgnoreCase))
+        {
+            RequestProjectCompile();
+        }
     }
 
     private bool IsInsideCache(string path)
@@ -306,11 +403,7 @@ public sealed class ScriptEngineService : IDisposable
 
     private static void TryDelete(string path)
     {
-        try
-        {
-            if (File.Exists(path))
-                File.Delete(path);
-        }
+        try { if (File.Exists(path)) File.Delete(path); }
         catch { }
     }
 

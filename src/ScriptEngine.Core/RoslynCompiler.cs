@@ -14,6 +14,20 @@ namespace CustomScriptEngine.Core;
 /// </summary>
 public sealed class RoslynCompiler
 {
+
+    private static string GetSimpleName(string path)
+    {
+        try
+        {
+            return AssemblyName.GetAssemblyName(path).Name
+                ?? Path.GetFileNameWithoutExtension(path);
+        }
+        catch
+        {
+            return Path.GetFileNameWithoutExtension(path);
+        }
+    }
+
     
     private static bool IsManagedAssembly(string path)
     {
@@ -130,11 +144,14 @@ public sealed class RoslynCompiler
         }
 
         var metadata = new List<MetadataReference>();
+
         foreach (var path in references
-                    .Where(File.Exists)
-                    .Select(Path.GetFullPath)
-                    .Distinct(StringComparer.OrdinalIgnoreCase)
-                    .Where(IsManagedAssembly))
+            .Where(File.Exists)
+            .Select(Path.GetFullPath)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Where(IsManagedAssembly)
+            .GroupBy(GetSimpleName, StringComparer.OrdinalIgnoreCase)
+            .Select(g => g.First()))
         {
             try
             {
@@ -143,10 +160,11 @@ public sealed class RoslynCompiler
             catch (Exception ex)
             {
                 diagnostics.Add(new ScriptDiagnostic(
-                    "Warning", "REF001", $"Could not read reference '{path}': {ex.Message}", path, 0, 0));
+                    "Warning", "REF001",
+                    $"Could not read reference '{path}': {ex.Message}",
+                    path, 0, 0));
             }
         }
-
         foreach (var missingReference in missing.Distinct(StringComparer.OrdinalIgnoreCase))
         {
             diagnostics.Add(new ScriptDiagnostic(

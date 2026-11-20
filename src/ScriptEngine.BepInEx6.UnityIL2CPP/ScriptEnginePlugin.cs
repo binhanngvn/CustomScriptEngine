@@ -24,11 +24,14 @@ public sealed class ScriptEnginePlugin : BasePlugin
     private CustomScriptProjectRuntime? _runtime;
     private CustomScriptContext? _context;
     private ScriptEngineHost? _host;
-    private ConfigEntry<KeyCode>? _reloadKey;
+    private ConfigEntry<string>? _reloadKey;
     private ConfigEntry<bool>? _watcherEnabled;
     private ConfigEntry<float>? _debounce;
     private ConfigEntry<bool>? _autoDiscoverReferences;
     private string? _projectKey;
+    private MethodInfo? _getKeyDownMethod;
+    private object? _reloadKeyValue;
+    private bool _reloadInputWarningShown;
 
     public override void Load()
     {
@@ -47,8 +50,9 @@ public sealed class ScriptEnginePlugin : BasePlugin
         Directory.CreateDirectory(libs);
         Directory.CreateDirectory(shared);
 
-        _reloadKey = Config.Bind("General", "ReloadKey", KeyCode.F6,
-            "Recompile and reload the complete shared IL2CPP script project.");
+        _reloadKey = Config.Bind("General", "ReloadKey", "F6",
+            "Unity KeyCode name used to recompile the shared script project. Requires the legacy Unity Input module; the file watcher works without it.");
+        InitializeReloadInput(_reloadKey.Value);
         _watcherEnabled = Config.Bind("General", "EnableFileSystemWatcher", true,
             "Automatically rebuild scripts-il2cpp after C# files change.");
         _debounce = Config.Bind("General", "AutoReloadDelay", 0.5f,
@@ -128,6 +132,62 @@ public sealed class ScriptEnginePlugin : BasePlugin
         });
     }
 
+    private void InitializeReloadInput(string keyName)
+    {
+        try
+        {
+            var keyCodeType = Type.GetType("UnityEngine.KeyCode, UnityEngine.CoreModule", throwOnError: false);
+            var inputType = Type.GetType("UnityEngine.Input, UnityEngine.InputLegacyModule", throwOnError: false);
+
+            if (keyCodeType == null || inputType == null)
+            {
+                Log.LogWarning("Unity legacy Input module was not found. The configured reload hotkey is unavailable; automatic file watching remains available.");
+                return;
+            }
+
+            _getKeyDownMethod = inputType.GetMethod(
+                "GetKeyDown",
+                BindingFlags.Public | BindingFlags.Static,
+                binder: null,
+                types: new[] { keyCodeType },
+                modifiers: null);
+
+            if (_getKeyDownMethod == null)
+            {
+                Log.LogWarning("UnityEngine.Input.GetKeyDown was not found. The configured reload hotkey is unavailable; automatic file watching remains available.");
+                return;
+            }
+
+            _reloadKeyValue = Enum.Parse(keyCodeType, keyName, ignoreCase: true);
+        }
+        catch (Exception ex)
+        {
+            _getKeyDownMethod = null;
+            _reloadKeyValue = null;
+            Log.LogWarning($"Could not initialize the reload hotkey '{keyName}': {ex.Message}");
+        }
+    }
+
+    private bool IsReloadKeyDown()
+    {
+        if (_getKeyDownMethod == null || _reloadKeyValue == null)
+            return false;
+
+        try
+        {
+            return _getKeyDownMethod.Invoke(null, new[] { _reloadKeyValue }) is bool pressed && pressed;
+        }
+        catch (Exception ex)
+        {
+            if (!_reloadInputWarningShown)
+            {
+                _reloadInputWarningShown = true;
+                Log.LogWarning($"Reload hotkey polling failed; automatic file watching remains available. {ex.Message}");
+            }
+            return false;
+        }
+    }
+
     private static List<string> FindReferenceDiscoveryDirectories(string gameRoot, string bepinexRoot)
     {
         var result = new List<string>();
@@ -160,7 +220,7 @@ public sealed class ScriptEnginePlugin : BasePlugin
             catch (Exception ex) { Log.LogError($"Queued main-thread action failed: {ex}"); }
         }
 
-        if (_reloadKey != null && Input.GetKeyDown(_reloadKey.Value))
+        if (IsReloadKeyDown())
             _service?.ReloadAll();
 
         _runtime?.OnUpdate();
@@ -205,6 +265,8 @@ public sealed class ScriptEnginePlugin : BasePlugin
             _runtime = null;
             _host = null;
             _context = null;
+            _getKeyDownMethod = null;
+            _reloadKeyValue = null;
             Instance = null;
         }
 

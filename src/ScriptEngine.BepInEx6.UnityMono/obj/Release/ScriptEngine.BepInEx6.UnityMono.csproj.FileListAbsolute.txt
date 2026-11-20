@@ -1,0 +1,9 @@
+C:\Users\binhanngvn\Downloads\game\CustomScriptEngine-main\CustomScriptEngine-main\artifacts\build\Mono\Release\CustomScriptEngine.deps.json
+C:\Users\binhanngvn\Downloads\game\CustomScriptEngine-main\CustomScriptEngine-main\artifacts\build\Mono\Release\CustomScriptEngine.dll
+C:\Users\binhanngvn\Downloads\game\CustomScriptEngine-main\CustomScriptEngine-main\artifacts\build\Mono\Release\CustomScriptEngine.pdb
+C:\Users\binhanngvn\Downloads\game\CustomScriptEngine-main\CustomScriptEngine-main\src\ScriptEngine.BepInEx6.UnityMono\obj\Release\ScriptEngine.BepInEx6.UnityMono.csproj.AssemblyReference.cache
+C:\Users\binhanngvn\Downloads\game\CustomScriptEngine-main\CustomScriptEngine-main\src\ScriptEngine.BepInEx6.UnityMono\obj\Release\ScriptEngine.BepInEx6.UnityMono.GeneratedMSBuildEditorConfig.editorconfig
+C:\Users\binhanngvn\Downloads\game\CustomScriptEngine-main\CustomScriptEngine-main\src\ScriptEngine.BepInEx6.UnityMono\obj\Release\ScriptEngine.BepInEx6.UnityMono.csproj.CoreCompileInputs.cache
+C:\Users\binhanngvn\Downloads\game\CustomScriptEngine-main\CustomScriptEngine-main\src\ScriptEngine.BepInEx6.UnityMono\obj\Release\ScriptEn.107C8917.Up2Date
+C:\Users\binhanngvn\Downloads\game\CustomScriptEngine-main\CustomScriptEngine-main\src\ScriptEngine.BepInEx6.UnityMono\obj\Release\CustomScriptEngine.dll
+C:\Users\binhanngvn\Downloads\game\CustomScriptEngine-main\CustomScriptEngine-main\src\ScriptEngine.BepInEx6.UnityMono\obj\Release\CustomScriptEngine.pdb

@@ -14,6 +14,21 @@ namespace CustomScriptEngine.Core;
 /// </summary>
 public sealed class RoslynCompiler
 {
+    
+    private static bool IsManagedAssembly(string path)
+    {
+        try
+        {
+            using var stream = File.OpenRead(path);
+            using var pe = new System.Reflection.PortableExecutable.PEReader(stream);
+            return pe.HasMetadata;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
     private readonly ReferenceResolver _resolver;
 
     public RoslynCompiler(ReferenceResolver resolver) => _resolver = resolver;
@@ -116,9 +131,10 @@ public sealed class RoslynCompiler
 
         var metadata = new List<MetadataReference>();
         foreach (var path in references
-                     .Where(File.Exists)
-                     .Select(Path.GetFullPath)
-                     .Distinct(StringComparer.OrdinalIgnoreCase))
+                    .Where(File.Exists)
+                    .Select(Path.GetFullPath)
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .Where(IsManagedAssembly))
         {
             try
             {

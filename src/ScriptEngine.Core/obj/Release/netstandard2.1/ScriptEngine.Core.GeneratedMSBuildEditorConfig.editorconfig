@@ -1,0 +1,8 @@
+is_global = true
+build_property.RootNamespace = ScriptEngine.Core
+build_property.ProjectDir = C:\Users\binhanngvn\Downloads\game\CustomScriptEngine-main\CustomScriptEngine-main\src\ScriptEngine.Core\
+build_property.EnableComHosting = 
+build_property.EnableGeneratedComInterfaceComImportInterop = 
+build_property.CsWinRTUseWindowsUIXamlProjections = false
+build_property.EffectiveAnalysisLevelStyle = 
+build_property.EnableCodeStyleSeverity = 

@@ -1,0 +1,11 @@
+C:\Users\binhanngvn\Downloads\game\CustomScriptEngine-main\CustomScriptEngine-main\src\ScriptEngine.BepInEx6.UnityIL2CPP\obj\Release\ScriptEngine.BepInEx6.UnityIL2CPP.csproj.AssemblyReference.cache
+C:\Users\binhanngvn\Downloads\game\CustomScriptEngine-main\CustomScriptEngine-main\src\ScriptEngine.BepInEx6.UnityIL2CPP\obj\Release\ScriptEngine.BepInEx6.UnityIL2CPP.GeneratedMSBuildEditorConfig.editorconfig
+C:\Users\binhanngvn\Downloads\game\CustomScriptEngine-main\CustomScriptEngine-main\src\ScriptEngine.BepInEx6.UnityIL2CPP\obj\Release\ScriptEngine.BepInEx6.UnityIL2CPP.csproj.CoreCompileInputs.cache
+C:\Users\binhanngvn\Downloads\game\CustomScriptEngine-main\CustomScriptEngine-main\artifacts\build\IL2CPP\Release\CustomScriptEngine.IL2CPP.deps.json
+C:\Users\binhanngvn\Downloads\game\CustomScriptEngine-main\CustomScriptEngine-main\artifacts\build\IL2CPP\Release\CustomScriptEngine.IL2CPP.dll
+C:\Users\binhanngvn\Downloads\game\CustomScriptEngine-main\CustomScriptEngine-main\artifacts\build\IL2CPP\Release\CustomScriptEngine.IL2CPP.pdb
+C:\Users\binhanngvn\Downloads\game\CustomScriptEngine-main\CustomScriptEngine-main\src\ScriptEngine.BepInEx6.UnityIL2CPP\obj\Release\ScriptEn.C42CB4B7.Up2Date
+C:\Users\binhanngvn\Downloads\game\CustomScriptEngine-main\CustomScriptEngine-main\src\ScriptEngine.BepInEx6.UnityIL2CPP\obj\Release\CustomScriptEngine.IL2CPP.dll
+C:\Users\binhanngvn\Downloads\game\CustomScriptEngine-main\CustomScriptEngine-main\src\ScriptEngine.BepInEx6.UnityIL2CPP\obj\Release\refint\CustomScriptEngine.IL2CPP.dll
+C:\Users\binhanngvn\Downloads\game\CustomScriptEngine-main\CustomScriptEngine-main\src\ScriptEngine.BepInEx6.UnityIL2CPP\obj\Release\CustomScriptEngine.IL2CPP.pdb
+C:\Users\binhanngvn\Downloads\game\CustomScriptEngine-main\CustomScriptEngine-main\src\ScriptEngine.BepInEx6.UnityIL2CPP\obj\Release\ref\CustomScriptEngine.IL2CPP.dll
